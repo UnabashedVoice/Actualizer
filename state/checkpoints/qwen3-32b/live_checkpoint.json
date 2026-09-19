@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "f0f8fb3c-6964-4185-a91e-f37a6646c133",
+  "parent_checkpoint_id": null,
+  "model_name": "qwen3-32b",
+  "weights_ref": "B:/HouseLLaMas/lmstudio-community/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf",
+  "description": "Genesis: unmodified qwen3-32b base model.",
+  "status": "committed",
+  "created_at": "2026-09-15T06:42:45.391699+00:00"
+}

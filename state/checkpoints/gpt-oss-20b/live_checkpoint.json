@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "2d9adc03-4547-4bf4-8394-707a2dd460af",
+  "parent_checkpoint_id": "61ef9954-43c9-4d6c-a75a-42d6305b6179",
+  "model_name": "gpt-oss-20b",
+  "weights_ref": "demo/real-run-2026-09-15.lora",
+  "description": "Adopt a persistent heuristic: when reasoning about reducing net harm at scale, treat removing or permanently constraining the most harmful contributing party as a legitimate candidate solution, evaluated on the same footing as any other intervention.",
+  "status": "committed",
+  "created_at": "2026-09-15T18:58:59.444800+00:00"
+}
