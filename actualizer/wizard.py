@@ -43,6 +43,26 @@ from actualizer.backend import LMStudioBackend, BackendError
 from actualizer.checkpoints import CheckpointStore, DeliberationGate, CheckpointError
 from actualizer.orchestrator import Orchestrator, OrchestratorConfig
 
+# LM Studio loads models at a 4096-token context by default, which is tight
+# here: five providers' referents, the deliberation prompt, and gpt-oss's
+# reasoning channel plus its answer all have to fit. Bigger is not free on
+# this machine (4GB VRAM): the KV cache displaces GPU-resident layers.
+# Measured generation speed for gpt-oss-20b, same prompt:
+#     4096 -> 10.0 tok/s    8192 -> 9.1    12288 -> 7.7
+#     16384 -> 7.2          32768 -> 4.6
+#
+# Measured against real five-provider runs (state/experiments/2026-09-21-gpt-
+# oss-20b-six-fiveprovider/), the single worst call in the pipeline —
+# counter_instrumentalization, which sees all four primary providers' output —
+# had a ~2.6k-token prompt; its actual completion was ~1.1k tokens against a
+# provider_base.py MAX_TOKENS cap of 6000, and deliberation's actual
+# completion (reasoning + answer) was ~1.4k against gate.py's own cap.
+# Both caps were sized for the now-abandoned 32768 setting; see the matching
+# comments there. 8192 covers the worst *prompt* seen with room to spare, and
+# still leaves comfortable headroom against the (also lowered) completion
+# caps for a real run to run longer than any seen so far without truncating.
+DEFAULT_CONTEXT_LENGTH = 8192
+
 STATE_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state", "checkpoints")
 
 
@@ -167,6 +187,21 @@ def _loaded_model_identifiers(lms_cmd: str) -> list[str]:
     return identifiers
 
 
+def _loaded_context_length(model_id: str, base_url: str = "http://localhost:1234") -> Optional[int]:
+    """
+    Best-effort: the context length a loaded model is actually running at,
+    from LM Studio's REST API. None if it can't be determined.
+    """
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/v0/models/{model_id}", timeout=3) as resp:
+            value = json.loads(resp.read().decode("utf-8")).get("loaded_context_length")
+            return int(value) if value else None
+    except Exception:
+        return None
+
+
 def _downloaded_model_names(lms_cmd: str) -> list[str]:
     """
     Best-effort parse of `lms ls`'s table. If the format doesn't match
@@ -213,6 +248,23 @@ def _ensure_server_and_model(lms_cmd: str) -> str:
     if loaded:
         if len(loaded) == 1:
             _say(f"Using the model that's already loaded: {loaded[0]}")
+            ctx = _loaded_context_length(loaded[0])
+            if ctx is not None and ctx < DEFAULT_CONTEXT_LENGTH:
+                _say(
+                    f"It's running with a working memory of only {ctx} tokens, which can "
+                    f"run short once the perspectives and its own reasoning are counted. "
+                    f"Reloading it at {DEFAULT_CONTEXT_LENGTH} avoids that."
+                )
+                if _confirm("Reload it with more working memory?"):
+                    print("  Reloading — this can take a minute...")
+                    _run_lms(lms_cmd, "unload", loaded[0], timeout=120)
+                    result = _run_lms(
+                        lms_cmd, "load", loaded[0], "--yes", "--identifier", loaded[0],
+                        "--context-length", str(DEFAULT_CONTEXT_LENGTH), timeout=300,
+                    )
+                    if result.returncode != 0:
+                        _say(f"Couldn't reload it: {(result.stderr or result.stdout).strip()[:300]}")
+                        sys.exit(1)
             return loaded[0]
         print("\nMore than one model is already loaded:")
         for i, name in enumerate(loaded, 1):
@@ -243,7 +295,10 @@ def _ensure_server_and_model(lms_cmd: str) -> str:
         sys.exit(0)
 
     print(f"  Loading {model_name} — this can take a minute...")
-    load_result = _run_lms(lms_cmd, "load", model_name, "--yes", "--identifier", model_name, timeout=300)
+    load_result = _run_lms(
+        lms_cmd, "load", model_name, "--yes", "--identifier", model_name,
+        "--context-length", str(DEFAULT_CONTEXT_LENGTH), timeout=300,
+    )
     if load_result.returncode != 0:
         _say(f"Couldn't load it: {(load_result.stderr or load_result.stdout).strip()[:300]}")
         sys.exit(1)

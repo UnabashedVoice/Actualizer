@@ -6,7 +6,7 @@ together the referent providers and the Synthesis Layer, logging every
 stage to the audit log:
 
     1. Decision received       ->  logged verbatim
-    2. Primary providers run   ->  stakes, precedent (independent reads)
+    2. Primary providers run   ->  stakes, precedent, case_for, endorsement (independent reads)
     3. Secondary providers run ->  counter_instrumentalization, with the
                                     primary providers' output visible, so
                                     it can respond to signals they surfaced
@@ -34,7 +34,9 @@ from .audit_log import AuditLog, writers
 from .backend import ModelBackend
 from .referents.referent_output import ProviderOutput, ProviderStatus
 from .referents.provider_base import ReferentProviderBase
+from .referents.case_for import CaseForProvider
 from .referents.counter_instrumentalization import CounterInstrumentalizationProvider
+from .referents.endorsement import EndorsementProvider
 from .referents.precedent import PrecedentProvider
 from .referents.stakes import StakesProvider
 from .synthesis.dossier_synthesizer import DossierSynthesizer
@@ -91,7 +93,7 @@ class PipelineResult:
 # Provider phasing
 # ---------------------------------------------------------------------------
 
-_PRIMARY_PROVIDER_NAMES = {"stakes", "precedent"}
+_PRIMARY_PROVIDER_NAMES = {"stakes", "precedent", "case_for", "endorsement"}
 _SECONDARY_PROVIDER_NAMES = {"counter_instrumentalization"}
 
 
@@ -100,6 +102,8 @@ def _default_providers(backend: Optional[ModelBackend]) -> list[ReferentProvider
     return [
         StakesProvider(**kwargs),
         PrecedentProvider(**kwargs),
+        CaseForProvider(**kwargs),
+        EndorsementProvider(**kwargs),
         CounterInstrumentalizationProvider(**kwargs),
     ]
 
@@ -118,7 +122,7 @@ class Orchestrator:
     Args:
         config:      OrchestratorConfig. Uses defaults if not provided.
         providers:   Referent providers to run. Defaults to the built-in
-                    set (stakes, precedent, counter_instrumentalization).
+                    set (stakes, precedent, case_for, endorsement, counter_instrumentalization).
                     Providers named in _PRIMARY_PROVIDER_NAMES run first,
                     independently; everything else runs second, with the
                     primary providers' output visible to it.

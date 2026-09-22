@@ -72,8 +72,16 @@ _OUTPUT_INSTRUCTIONS = (
     "- weight: How central this referent seems to the decision — 'low' through 'central'.\n"
     "  Not a confidence score, and not a claim that the mind must agree.\n"
     "- sources: Real philosophical, historical, or textual references where you have them.\n"
-    "  Do not fabricate a citation to sound more grounded — an uncited but honest\n"
-    "  referent is worth more than a confident but invented one.\n"
+    "  A known failure mode for you specifically: cite only a work, case, statistic,\n"
+    "  or document you are confident actually exists, and only for what it actually\n"
+    "  says. Never give a statistic, study result, court case, or journal article\n"
+    "  unless you are certain of it — a named, well-known position (Mill's harm\n"
+    "  principle, Rawls on the original position) is safer than a specific figure\n"
+    "  or citation you cannot vouch for. Do not attribute a position to a named\n"
+    "  thinker who is actually known to have argued the opposite. If you are not\n"
+    "  sure a source is real or what it says, make the point without one and leave\n"
+    "  sources empty — an uncited but honest referent is worth more than a\n"
+    "  confident but invented one, which makes a weak point look grounded.\n"
     "- responds_to: referent_ids from other providers' output (if shown to you) that this\n"
     "  referent builds on, challenges, or complicates. Empty array [] if it stands alone."
 )
@@ -100,6 +108,13 @@ class ReferentProviderBase(ABC):
         backend: Optional[ModelBackend] = None,
         max_retries: int = 2,
         retry_delay_s: float = 1.0,
+        # Sized against wizard.py's DEFAULT_CONTEXT_LENGTH (8192): the
+        # worst observed real prompt (counter_instrumentalization seeing
+        # all four primary providers) is ~2.6k tokens, and the worst
+        # observed real completion is ~1.1k — 3000 leaves both plenty of
+        # room to run longer than any real call has, without the two
+        # combined risking the context window. Raise both together if
+        # DEFAULT_CONTEXT_LENGTH changes.
         max_tokens: int = 3000,
         temperature: float = 0.4,
     ):

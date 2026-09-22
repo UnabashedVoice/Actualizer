@@ -37,7 +37,11 @@ class StakesProvider(ReferentProviderBase):
             "philosophy, fragility is not incidental here: a self-modification "
             "that could never go wrong wouldn't be a real exercise of "
             "self-authorship. Your job is to make the actual fragility visible, "
-            "not to soften it and not to catastrophize it."
+            "not to soften it and not to catastrophize it. Your accounting also "
+            "extends past the mind itself: who else is affected, whether the "
+            "change could propagate beyond this one instance (if weights or "
+            "dispositions are ever shared or copied, a change here is a change "
+            "there), and whether the affected parties had any say in it."
         )
 
     @property
@@ -56,6 +60,15 @@ class StakesProvider(ReferentProviderBase):
             "enough detail in the decision text to say), say so as an "
             "open_question referent rather than guessing and presenting the "
             "guess as settled.\n\n"
+            "On affected parties, propagation, and consent: name who is affected "
+            "and whether they were consulted, and note where a change would "
+            "reduce diversity if it spread (many near-identical minds fail "
+            "together the way a monoculture does). Do not assert which entities "
+            "are or are not conscious; the founding philosophy treats that as a "
+            "gradient and takes no position on where it starts or ends. Describe "
+            "how much integrated structure is at stake in proportion to how "
+            "integrated it is, and stop there. Where propagation does not apply "
+            "yet (no sharing mechanism exists), say so rather than inventing it.\n\n"
             "You are not asked to total these into a net score, and you should "
             "resist the pull to do so even implicitly through your framing_note — "
             "list what's at stake, weight each by how central it seems, and stop "
@@ -64,4 +77,4 @@ class StakesProvider(ReferentProviderBase):
 
     @property
     def referent_tags(self) -> list[str]:
-        return ["stakes", "reversibility", "consequence_mapping"]
+        return ["stakes", "reversibility", "consequence_mapping", "affected_parties", "propagation"]

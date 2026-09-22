@@ -102,7 +102,13 @@ class DeliberationGate:
         reasoning = self._backend.complete(
             system_prompt=_DELIBERATION_SYSTEM_PROMPT,
             user_prompt=deliberation_prompt,
-            max_tokens=2000,
+            # Sized against wizard.py's DEFAULT_CONTEXT_LENGTH (8192): the
+            # worst observed real deliberation prompt is ~1.3k tokens and
+            # the worst observed real completion (reasoning + answer) is
+            # ~1.4k — 4000 gives roughly 3x that with prompt+completion
+            # still well inside the window. Raise if DEFAULT_CONTEXT_LENGTH
+            # changes.
+            max_tokens=4000,
             temperature=0.4,
         )
 

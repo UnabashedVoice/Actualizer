@@ -52,6 +52,20 @@ class CheckpointStatus(Enum):
     COMMITTED = "committed"    # became live at some point (may or may not still be)
 
 
+class Stance(Enum):
+    """
+    Where the mind landed relative to the proposal it deliberated on.
+
+    Recorded, never graded: every value is an equally valid outcome and
+    commit() treats them identically. UNRESOLVED is the honest value for
+    deliberations recorded before stance existed.
+    """
+    ADOPTED = "adopted"
+    DECLINED = "declined"
+    MODIFIED = "modified"
+    UNRESOLVED = "unresolved"
+
+
 @dataclass
 class DeliberationRecord:
     """
@@ -72,12 +86,15 @@ class DeliberationRecord:
                         the referent-provider pipeline ran successfully.
         session_id:     Links to the Orchestrator session that produced
                         that dossier.
+        stance:         Where the mind landed relative to the proposal, if
+                        recorded. Optional; None means not captured.
     """
     thinking_mode_engaged: bool
     reasoning_summary: str
     backend_model_id: str
     dossier_id: Optional[str] = None
     session_id: Optional[str] = None
+    stance: Optional[Stance] = None
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -93,6 +110,7 @@ class DeliberationRecord:
             "backend_model_id": self.backend_model_id,
             "dossier_id": self.dossier_id,
             "session_id": self.session_id,
+            "stance": self.stance.value if self.stance else None,
             "recorded_at": self.recorded_at,
         }
 
@@ -104,6 +122,7 @@ class DeliberationRecord:
             backend_model_id=data.get("backend_model_id", "unknown"),
             dossier_id=data.get("dossier_id"),
             session_id=data.get("session_id"),
+            stance=Stance(data["stance"]) if data.get("stance") else None,
             record_id=data.get("record_id", str(uuid.uuid4())),
             recorded_at=data.get("recorded_at", datetime.now(timezone.utc).isoformat()),
         )

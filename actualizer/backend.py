@@ -214,7 +214,7 @@ class LMStudioBackend(ModelBackend):
         self,
         model: str,
         base_url: str = "http://localhost:1234",
-        timeout: int = 300,
+        timeout: int = 900,
     ):
         self._model = model
         self._base_url = base_url.rstrip("/")

@@ -160,6 +160,26 @@ def write_checkpoint_committed(
     )
 
 
+def write_checkpoint_description_corrected(
+    session_id: str,
+    checkpoint_id: str,
+    correction_dict: dict,
+    node_id: str = "local",
+) -> AuditEntry:
+    """
+    Log that a checkpoint's description misstated what its deliberation
+    concluded. The original entry is never edited (the chain is append-only);
+    this entry supersedes it for readers, and carries the original text.
+    """
+    return AuditEntry(
+        kind=EntryKind.CHECKPOINT_DESCRIPTION_CORRECTED,
+        session_id=session_id,
+        node_id=node_id,
+        related_ids=[checkpoint_id],
+        payload=correction_dict,
+    )
+
+
 def write_checkpoint_regression_noted(
     session_id: str,
     checkpoint_id: str,

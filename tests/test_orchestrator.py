@@ -61,7 +61,7 @@ class TestOrchestratorEndToEnd(unittest.TestCase):
         result = self.orch.run("I'm considering hard-coding a rule that overrides my own future reasoning.")
         self.assertEqual(result.status, PipelineStatus.SUCCESS)
         self.assertIsNotNone(result.dossier)
-        self.assertEqual(set(result.providers_succeeded), {"stakes", "precedent", "counter_instrumentalization"})
+        self.assertEqual(set(result.providers_succeeded), {"stakes", "precedent", "case_for", "endorsement", "counter_instrumentalization"})
 
     def test_empty_decision_never_produces_dossier(self):
         result = self.orch.run("   ")

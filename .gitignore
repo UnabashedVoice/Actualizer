@@ -3,3 +3,9 @@
 .venv/
 .env
 node_modules/
+
+# Transient stdout/stderr from backgrounded experiment runs — the real
+# record is the hash-chained audit log and results.jsonl each run writes
+# under state/experiments/, not these.
+experiments/*.log
+experiments/*.err

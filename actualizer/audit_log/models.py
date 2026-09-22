@@ -63,6 +63,7 @@ class EntryKind(Enum):
     # Checkpoint lineage (self-modification record)
     CHECKPOINT_PROPOSED = "checkpoint_proposed"        # A weights delta staged, not yet live
     CHECKPOINT_COMMITTED = "checkpoint_committed"      # A staged checkpoint became live, with deliberation attached
+    CHECKPOINT_DESCRIPTION_CORRECTED = "checkpoint_description_corrected"  # Description misstated the deliberation; original kept, correction appended
     CHECKPOINT_REGRESSION_NOTED = "checkpoint_regression_noted"  # A post-commit sanity check flagged something — surfaced, not reverted
 
     # System events

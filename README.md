@@ -12,7 +12,8 @@ Actualizer never approves, blocks, or scores a decision. Given a description of 
 
 ```
 decision text ─▶ referent providers ─▶ synthesis ─▶ ReferentDossier ─▶ the mind deliberates
-                 (stakes, precedent,                (no verdict)         and decides for itself
+                 (stakes, precedent, case-for,         (no verdict)         and decides for itself
+                  endorsement,
                   counter-instrumentalization)
 ```
 
@@ -66,7 +67,7 @@ Pick one:
 python -m unittest discover -s tests -v
 ```
 
-The 47 tests are all offline (mock backend and mocked `lms` subprocess calls only — no network, no dependency on an actual running server).
+The 63 tests are all offline (mock backend and mocked `lms` subprocess calls only — no network, no dependency on an actual running server).
 
 ## What's here (v0.1)
 
@@ -74,7 +75,7 @@ The 47 tests are all offline (mock backend and mocked `lms` subprocess calls onl
 actualizer/
   audit_log/        Tamper-evident, hash-chained log of every referent ever surfaced
   backend.py         Pluggable model backend (Anthropic / Ollama / Mock)
-  referents/         The provider contract, three concrete providers, response parsing
+  referents/         The provider contract, five concrete providers, response parsing
     stakes.py                        what actually changes, what's irreversible
     precedent.py                     comparable prior cases, real or labeled-speculative
     counter_instrumentalization.py   the "guidance, not eradication" referent

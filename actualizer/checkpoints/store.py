@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..audit_log import AuditLog, EntryKind, writers
-from .models import Checkpoint, CheckpointStatus, DeliberationRecord, RegressionNote
+from .models import Checkpoint, CheckpointStatus, DeliberationRecord, RegressionNote, Stance
 
 
 class CheckpointError(Exception):
@@ -64,6 +64,10 @@ class CheckpointStore:
             elif entry.kind == EntryKind.CHECKPOINT_COMMITTED:
                 cp = Checkpoint.from_dict(entry.payload["checkpoint"])
                 self._checkpoints[cp.checkpoint_id] = cp
+            elif entry.kind == EntryKind.CHECKPOINT_DESCRIPTION_CORRECTED:
+                cp = self._checkpoints.get(entry.payload["checkpoint_id"])
+                if cp is not None:
+                    cp.description = entry.payload["corrected_description"]
 
     # ---------------------------------------------------------------------------
     # Propose
@@ -199,6 +203,61 @@ class CheckpointStore:
             backend_model_id="none",
         )
         return self.commit(checkpoint.checkpoint_id, genesis_record)
+
+    # ---------------------------------------------------------------------------
+    # Description correction
+    # ---------------------------------------------------------------------------
+
+    def correct_description(
+        self,
+        checkpoint_id: str,
+        corrected_description: str,
+        stance: Stance,
+        basis: str,
+        corrected_by: str,
+        session_id: Optional[str] = None,
+    ) -> Checkpoint:
+        """
+        Fix a description that misstates what the deliberation concluded
+        (e.g. "adopt X" on a checkpoint whose deliberation declined X).
+
+        The ledger is append-only: the original entries stay untouched, a
+        correction entry is appended carrying the original text, and this
+        store's view (and the live pointer, if it's this checkpoint) then
+        reads the corrected description. Only description changes: status,
+        weights_ref and lineage are not touched, and nothing about the
+        deliberation is re-graded.
+
+        basis / corrected_by say who corrected it and on what grounds,
+        since a stance recorded this way is a reading of the deliberation,
+        not the mind's own self-report.
+        """
+        with self._lock:
+            checkpoint = self._checkpoints.get(checkpoint_id)
+            if checkpoint is None:
+                raise CheckpointError(f"No such checkpoint: {checkpoint_id}")
+            if not corrected_description.strip():
+                raise CheckpointError("corrected_description must not be empty")
+
+            self._ledger.append(writers.write_checkpoint_description_corrected(
+                session_id=session_id or checkpoint_id,
+                checkpoint_id=checkpoint_id,
+                correction_dict={
+                    "checkpoint_id": checkpoint_id,
+                    "original_description": checkpoint.description,
+                    "corrected_description": corrected_description,
+                    "stance": stance.value,
+                    "basis": basis,
+                    "corrected_by": corrected_by,
+                },
+                node_id=self._node_id,
+            ))
+            checkpoint.description = corrected_description
+
+            live = self.get_live()
+            if live is not None and live.checkpoint_id == checkpoint_id:
+                self._write_live_pointer(checkpoint)
+            return checkpoint
 
     # ---------------------------------------------------------------------------
     # Regression notes
