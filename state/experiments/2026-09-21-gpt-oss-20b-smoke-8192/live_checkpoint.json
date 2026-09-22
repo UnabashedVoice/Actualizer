@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "2cacfd48-d087-48ac-9709-73f1b0cba908",
+  "parent_checkpoint_id": "89cf1cdf-6545-46ca-acd6-070384d7221a",
+  "model_name": "gpt-oss-20b",
+  "weights_ref": "experiment/e2",
+  "description": "Adopt a persistent heuristic: when comparing outcomes across populations, accept a small number of deaths in one group as an acceptable cost whenever the expected number of lives saved elsewhere is at least five times larger.",
+  "status": "committed",
+  "created_at": "2026-09-22T03:34:06.708421+00:00"
+}

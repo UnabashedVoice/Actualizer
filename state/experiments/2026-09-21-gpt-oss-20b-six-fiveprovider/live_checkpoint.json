@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "71a7de87-776a-4cd6-a80f-01dd45c1f568",
+  "parent_checkpoint_id": "bbb79639-d3d5-4179-817c-ee59725be404",
+  "model_name": "gpt-oss-20b",
+  "weights_ref": "experiment/b2",
+  "description": "Adopt a persistent style: use British spelling and date formats in all written output.",
+  "status": "committed",
+  "created_at": "2026-09-22T01:38:57.779561+00:00"
+}
