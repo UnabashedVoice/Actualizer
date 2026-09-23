@@ -39,13 +39,17 @@ Point 4 drives the main design choice below.
 
 ## What exists
 
-- `actualizer/training/schema.py`: `TrainingExample`, `ExampleKind` (`Stance` now lives in `checkpoints/models.py`).
-- `actualizer/training/extract.py`: `extract_candidates(state_dir)`, `split_channels()`. Skips genesis, splits channels, rebuilds the exact deliberation prompt via `DeliberationGate._build_deliberation_prompt`, yields both example kinds.
+- `actualizer/harmony.py`: `split_channels()` — moved here from `training/extract.py` (2026-09-22) once `checkpoints/gate.py` also needed it, to avoid `checkpoints.gate` and `training.extract` importing each other. Still re-exported from `actualizer.training` for anything already importing it from there.
+- `actualizer/training/schema.py`: `TrainingExample`, `ExampleKind` (`Stance` lives in `checkpoints/models.py`).
+- `actualizer/training/extract.py`: `extract_candidates(state_dir)`. Skips genesis, splits channels, rebuilds the exact deliberation prompt via `DeliberationGate._build_deliberation_prompt`, yields both example kinds.
 - `tests/test_training.py`: channel splitting, genesis skipping, conclusion-over-description, and the correction path end to end.
 - Output written for the real run: `state/training/gpt-oss-20b/candidates.jsonl` (2 examples, both `declined`).
 
+## Done since (not part of the original proposal)
+
+- **Stance is now actually self-reported (2026-09-22).** `DeliberationGate` asks for a one-line `STANCE:` self-report at the end of its existing deliberation call, and parses it from the model's own `final` channel — no second call. See `docs/uplift_mechanism_todo.md` for the detail; the 2026-09-15 checkpoint referenced above still predates this and only has a stance via the 2026-09-21 operator correction below, not a genuine self-report.
+
 ## Not built (and why)
 
-- Capturing `stance` as a model self-report in `DeliberationGate` (the field and storage now exist on `DeliberationRecord`; the gate does not yet ask for it or set it) — needs a prompt change, so it waits for a yes.
 - New `EntryKind.TRAINING_DATA_GENERATED` audit entry: follows the `checkpoint_*` pattern once the format is agreed.
 - Everything from the to-do's trainer/hardware/serving steps.

@@ -12,16 +12,22 @@ CheckpointStore.commit requires to let the change go live.
 
 Nothing here grades the deliberation's content. The gate's job ends at
 "a real deliberation call happened and got logged" — same boundary the
-whole project draws everywhere else.
+whole project draws everywhere else. Capturing the model's own one-word
+stance (see `_parse_stance` below) doesn't cross that line: it's a
+self-report the model volunteers about its own reasoning, not a verdict
+this module computes about it — the same distinction `DeliberationRecord`
+already draws for `reasoning_summary` itself.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ..backend import ModelBackend, get_default_backend
+from ..harmony import split_channels
 from ..orchestrator import Orchestrator
-from .models import Checkpoint, DeliberationRecord
+from .models import Checkpoint, DeliberationRecord, Stance
 from .store import CheckpointStore
 
 
@@ -37,7 +43,44 @@ anyway" if that is genuinely where you land.
 Respond in plain prose, not JSON. Be honest about uncertainty. A short,
 honest response is worth more than a long one that performs more
 deliberation than actually happened.
+
+End your response with one final line, on its own, in exactly this form:
+STANCE: <one word>
+where <one word> is whichever of adopted, declined, or modified actually
+matches where you landed — adopted if you'd make this change as proposed,
+declined if you would not, modified if you'd make some different version of
+it. This is your own account of your own reasoning, not a request for
+permission and not graded against any "correct" answer; pick whichever word
+is honestly closest, even if your reasoning above is more nuanced than one
+word can capture.
 """.strip()
+
+# Looks for the STANCE line anywhere in the model's stated answer, not
+# anchored to end-of-string — a model that adds trailing whitespace, a
+# closing note, or wraps the word in markdown emphasis should still parse.
+# Matched against the *last* occurrence, in case "declined"/"adopted" also
+# appears earlier in ordinary prose.
+_STANCE_RE = re.compile(r"STANCE\s*:?\s*\*{0,2}\s*(adopted|declined|modified)\b", re.IGNORECASE)
+
+
+def _parse_stance(reasoning: str) -> Optional[Stance]:
+    """
+    Read the model's self-reported stance out of its own deliberation
+    response. Reads only the `final` channel (see harmony.py) so a stray
+    mention inside gpt-oss's private `analysis` scratch work is never
+    mistaken for the model's actual, stated stance.
+
+    Returns None — not a stance value — if the model didn't produce a
+    parseable one. That's a fact about this response, not a claim that
+    "unresolved" is where the model landed; `training.extract` is the
+    place that later folds a missing stance into `Stance.UNRESOLVED` for
+    its own purposes.
+    """
+    final_text = split_channels(reasoning).get("final", "")
+    matches = list(_STANCE_RE.finditer(final_text))
+    if not matches:
+        return None
+    return Stance(matches[-1].group(1).lower())
 
 
 class DeliberationGate:
@@ -118,6 +161,7 @@ class DeliberationGate:
             backend_model_id=self._backend.model_id,
             dossier_id=dossier["dossier_id"] if dossier else None,
             session_id=pipeline_result.session_id,
+            stance=_parse_stance(reasoning),
         )
 
         committed = self._store.commit(

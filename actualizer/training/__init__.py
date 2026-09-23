@@ -6,7 +6,8 @@ provenance so "what did it actually train on" is a checkable claim. See
 docs/training_set_framework.md.
 """
 
+from ..harmony import split_channels
 from .schema import TrainingExample, Stance
-from .extract import extract_candidates, split_channels
+from .extract import extract_candidates
 
 __all__ = ["TrainingExample", "Stance", "extract_candidates", "split_channels"]

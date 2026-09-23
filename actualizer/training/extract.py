@@ -11,23 +11,12 @@ mind concluded.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Iterator, Optional
 
 from ..checkpoints.gate import DeliberationGate
+from ..harmony import split_channels
 from .schema import ExampleKind, Stance, TrainingExample
-
-_CHANNEL_RE = re.compile(r"<\|channel\|>(\w+)<\|message\|>(.*?)(?=<\|end\|>|<\|channel\|>|$)", re.S)
-
-
-def split_channels(text: str) -> dict[str, str]:
-    """
-    Split harmony-format output into {channel: text}. Text with no channel
-    markers is treated as all `final`.
-    """
-    found = {m.group(1): m.group(2).strip() for m in _CHANNEL_RE.finditer(text)}
-    return found or {"final": text.strip()}
 
 
 def _read_jsonl(path: Path) -> list[dict]:

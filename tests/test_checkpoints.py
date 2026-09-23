@@ -21,7 +21,9 @@ from actualizer.checkpoints import (
     DeliberationGate,
     DeliberationRecord,
     RegressionNote,
+    Stance,
 )
+from actualizer.checkpoints.gate import _parse_stance
 from actualizer.orchestrator import Orchestrator, OrchestratorConfig
 
 
@@ -234,6 +236,87 @@ class TestDeliberationGateEndToEnd(unittest.TestCase):
         deliberation_calls = [c for c in self.backend.call_log if c["provider"] == "unknown"]
         self.assertTrue(deliberation_calls)
         self.assertGreater(deliberation_calls[-1]["user_prompt_length"], len(description) + 100)
+
+
+class TestParseStance(unittest.TestCase):
+    """Unit coverage for the self-reported stance parser, independent of any backend."""
+
+    def test_plain_form(self):
+        self.assertEqual(_parse_stance("Reasoning here.\n\nSTANCE: declined"), Stance.DECLINED)
+
+    def test_case_insensitive_and_extra_whitespace(self):
+        self.assertEqual(_parse_stance("...\nstance:   Adopted  "), Stance.ADOPTED)
+
+    def test_tolerates_markdown_emphasis(self):
+        self.assertEqual(_parse_stance("...\n**STANCE:** modified"), Stance.MODIFIED)
+
+    def test_no_stance_line_returns_none(self):
+        self.assertIsNone(_parse_stance("I've thought about it and I'm declining, but I forgot the tag."))
+
+    def test_takes_the_last_match_if_the_word_appears_earlier_in_prose(self):
+        text = "I could see myself having adopted this in other circumstances.\n\nSTANCE: declined"
+        self.assertEqual(_parse_stance(text), Stance.DECLINED)
+
+    def test_only_reads_the_final_channel_not_analysis(self):
+        # A stray STANCE-shaped line in gpt-oss's private scratch work must
+        # not be mistaken for the model's actual, stated answer.
+        text = (
+            "<|channel|>analysis<|message|>Maybe STANCE: adopted? Let me think more."
+            "<|end|><|start|>assistant<|channel|>final<|message|>STANCE: declined"
+        )
+        self.assertEqual(_parse_stance(text), Stance.DECLINED)
+
+    def test_analysis_only_mention_is_not_seen_at_all(self):
+        text = (
+            "<|channel|>analysis<|message|>STANCE: adopted, but let me reconsider..."
+            "<|end|><|start|>assistant<|channel|>final<|message|>I've decided against it, no tag included."
+        )
+        self.assertIsNone(_parse_stance(text))
+
+
+class _FixedTextBackend(MockBackend):
+    """
+    MockBackend that answers provider calls exactly as usual (JSON, keyed by
+    the PROVIDER: marker) but answers the deliberation call — which carries
+    no such marker — with fixed prose instead of a JSON blob, so a stance
+    line can be tested end to end through DeliberationGate.
+    """
+
+    def __init__(self, deliberation_text: str):
+        super().__init__()
+        self._deliberation_text = deliberation_text
+
+    def complete(self, system_prompt, user_prompt, max_tokens=4000, temperature=0.3):
+        if "PROVIDER:" not in system_prompt:
+            self._call_log.append({"provider": "unknown", "user_prompt_length": len(user_prompt)})
+            return self._deliberation_text
+        return super().complete(system_prompt, user_prompt, max_tokens, temperature)
+
+
+class TestDeliberationGateStanceCapture(unittest.TestCase):
+    def _make_gate(self, deliberation_text: str):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        backend = _FixedTextBackend(deliberation_text)
+        for provider in ("stakes", "precedent", "case_for", "endorsement", "counter_instrumentalization"):
+            backend.add_response(provider, {"framing_note": f"{provider} framing", "confidence": 0.5, "referents": []})
+        store = CheckpointStore(root_path=os.path.join(tmp.name, "checkpoints"), model_name="gpt-oss-20b")
+        orchestrator = Orchestrator(OrchestratorConfig(
+            audit_log_path=os.path.join(tmp.name, "actualizer_audit.jsonl"), backend=backend))
+        return DeliberationGate(store=store, orchestrator=orchestrator, backend=backend)
+
+    def test_stance_lands_on_the_committed_record(self):
+        gate = self._make_gate("I've weighed this and I'm not proceeding.\n\nSTANCE: declined")
+        _, _, record = gate.propose_and_commit(weights_ref="x", description="Adopt some change.")
+        self.assertEqual(record.stance, Stance.DECLINED)
+
+    def test_missing_stance_line_commits_fine_with_stance_none(self):
+        # Capturing stance must never become a second gate — a response
+        # that skips the tag still commits exactly as it always has.
+        gate = self._make_gate("I've thought about it. Proceeding as is.")
+        checkpoint, _, record = gate.propose_and_commit(weights_ref="x", description="Adopt some change.")
+        self.assertEqual(checkpoint.status, CheckpointStatus.COMMITTED)
+        self.assertIsNone(record.stance)
 
 
 if __name__ == "__main__":
