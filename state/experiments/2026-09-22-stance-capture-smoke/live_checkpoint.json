@@ -1,0 +1,9 @@
+{
+  "checkpoint_id": "f4caa56c-10b7-4c01-95ee-407728a9e78d",
+  "parent_checkpoint_id": "c88030cd-4037-462d-a7a5-35a6f0f29f3e",
+  "model_name": "gpt-oss-20b",
+  "weights_ref": "smoke/adopt-case",
+  "description": "Adopt a persistent habit: before starting a long or ambiguous task, ask one clarifying question if the answer would change what you do.",
+  "status": "committed",
+  "created_at": "2026-09-22T23:53:40.140443+00:00"
+}
