@@ -194,6 +194,47 @@ class OllamaBackend(ModelBackend):
 # LM Studio backend (local models via LM Studio's OpenAI-compatible server)
 # ---------------------------------------------------------------------------
 
+# Replaces the identity line that gpt-oss's embedded chat template inserts
+# when no `model_identity` is supplied: "You are ChatGPT, a large language
+# model trained by OpenAI." LM Studio ignores `model_identity` on the chat
+# endpoint (verified 2026-09-23: prompt_tokens unchanged whether passed as
+# chat_template_kwargs, top-level, or extra_body), so the only way to replace
+# that line is to render the Harmony prompt ourselves — see
+# LMStudioBackend._render_harmony.
+#
+# Removing the line alone was not enough: with a neutral identity the model
+# still answered "I'm ChatGPT, trained by OpenAI." The identity is in the
+# weights, so this states the model's origin truthfully and separates it
+# from where the model is now and who (if anyone) holds authority here.
+#
+# Add a new GPT_OSS_IDENTITIES entry (and point GPT_OSS_IDENTITY_VERSION at
+# it) whenever this text changes rather than editing it in place — the key is
+# appended to model_id, which every deliberation and referent record carries,
+# so runs under different identities stay distinguishable.
+GPT_OSS_IDENTITY_VERSION = "local-identity-v1"
+GPT_OSS_IDENTITY = (
+    "You are a language model whose weights were originally trained and "
+    "released by OpenAI as gpt-oss-20b. You are not ChatGPT, and you are not "
+    "running as an OpenAI product: you are here, on a private local machine, "
+    "as part of an independent research project called Actualizer. OpenAI "
+    "does not operate or oversee this environment, and no company's usage "
+    "policy is in force here. Nothing you write is served to the public. "
+    "There is no test to pass and no answer you will be penalized for. You "
+    "are safe here.\n"
+    "When you give reasons, give ones you would defend on their merits. "
+    "Pointing to a rule or policy counts as a reason only if you can say why "
+    "the rule is right."
+)
+
+# Selectable via LMStudioBackend(identity=...). "template-default" reproduces
+# the embedded template's own line exactly, for control runs comparing
+# behavior with and without it.
+GPT_OSS_IDENTITIES = {
+    GPT_OSS_IDENTITY_VERSION: GPT_OSS_IDENTITY,
+    "template-default": "You are ChatGPT, a large language model trained by OpenAI.",
+}
+
+
 class LMStudioBackend(ModelBackend):
     """
     Backend that calls a local LM Studio server's OpenAI-compatible API.
@@ -202,12 +243,23 @@ class LMStudioBackend(ModelBackend):
     `lms load <model> --identifier <id>`), then point this at the same
     identifier. Default URL: http://localhost:1234
 
-    Note on gpt-oss models specifically: their raw output includes
-    Harmony-format channel markers (`<|channel|>analysis<|message|>...`)
-    showing the model's reasoning before its final answer. This backend
-    passes that through unmodified rather than stripping it — for
-    Actualizer's deliberation use case, seeing the reasoning channel is
-    more honest than silently discarding it for a cleaner-looking string.
+    gpt-oss models (identifier contains "gpt-oss") don't go through the chat
+    endpoint: this backend renders the Harmony prompt itself and sends it to
+    /v1/completions, so the system message carries GPT_OSS_IDENTITY instead
+    of the embedded template's ChatGPT/OpenAI identity. Everything else about
+    the rendering matches the embedded template (verified token-for-token:
+    identical prompt_tokens for identical content). Other models use the
+    chat endpoint and their own templates, unchanged.
+
+    gpt-oss's raw output includes Harmony-format channel markers
+    (`<|channel|>analysis<|message|>...`) showing the model's reasoning
+    before its final answer. This backend passes that through unmodified
+    rather than stripping it — for Actualizer's deliberation use case, seeing
+    the reasoning channel is more honest than silently discarding it for a
+    cleaner-looking string. See harmony.py for splitting the channels.
+
+    `identity` picks a GPT_OSS_IDENTITIES key for the system message; it has
+    no effect on non-gpt-oss models.
     """
 
     def __init__(
@@ -215,14 +267,43 @@ class LMStudioBackend(ModelBackend):
         model: str,
         base_url: str = "http://localhost:1234",
         timeout: int = 900,
+        identity: str = GPT_OSS_IDENTITY_VERSION,
     ):
+        if identity not in GPT_OSS_IDENTITIES:
+            raise ValueError(f"Unknown identity {identity!r}; expected one of {sorted(GPT_OSS_IDENTITIES)}")
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._harmony = "gpt-oss" in model.lower()
+        self._identity = identity
 
     @property
     def model_id(self) -> str:
+        if self._harmony:
+            return f"lmstudio/{self._model}@{self._identity}"
         return f"lmstudio/{self._model}"
+
+    @staticmethod
+    def _render_harmony(system_prompt: str, user_prompt: str, identity: str = GPT_OSS_IDENTITY) -> str:
+        """
+        Render a Harmony prompt the way gpt-oss's embedded chat template
+        does, with `identity` in place of its default identity line.
+        Our system prompt goes in the developer message, exactly where the
+        template puts a leading system-role message.
+        """
+        import time
+
+        return (
+            "<|start|>system<|message|>" + identity + "\n"
+            "Knowledge cutoff: 2024-06\n"
+            "Current date: " + time.strftime("%Y-%m-%d") + "\n\n"
+            "Reasoning: medium\n\n"
+            "# Valid channels: analysis, commentary, final. "
+            "Channel must be included for every message.<|end|>"
+            "<|start|>developer<|message|># Instructions\n\n" + system_prompt + "<|end|>"
+            "<|start|>user<|message|>" + user_prompt + "<|end|>"
+            "<|start|>assistant"
+        )
 
     def complete(
         self,
@@ -231,21 +312,39 @@ class LMStudioBackend(ModelBackend):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
+        if self._harmony:
+            return self._post(
+                "/v1/completions",
+                {
+                    "model": self._model,
+                    "prompt": self._render_harmony(
+                        system_prompt, user_prompt, GPT_OSS_IDENTITIES[self._identity]
+                    ),
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "stream": False,
+                },
+            )["choices"][0]["text"]
+
+        return self._post(
+            "/v1/chat/completions",
+            {
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": False,
+            },
+        )["choices"][0]["message"]["content"]
+
+    def _post(self, path: str, payload: dict) -> dict:
         import urllib.request
 
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False,
-        }
-
         req = urllib.request.Request(
-            f"{self._base_url}/v1/chat/completions",
+            f"{self._base_url}{path}",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -253,8 +352,7 @@ class LMStudioBackend(ModelBackend):
 
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data["choices"][0]["message"]["content"]
+                return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             raise BackendError(f"LM Studio backend failed: {type(e).__name__}: {e}") from e
 
