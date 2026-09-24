@@ -21,6 +21,13 @@ class TestSplitChannels(unittest.TestCase):
     def test_plain_text_is_final(self):
         self.assertEqual(split_channels("just prose"), {"final": "just prose"})
 
+    def test_qwen_think_block_is_analysis(self):
+        t = "<think>\nthinking\n</think>\n\nanswer\nSTANCE: declined"
+        self.assertEqual(split_channels(t), {"analysis": "thinking", "final": "answer\nSTANCE: declined"})
+
+    def test_unclosed_think_block_has_empty_final(self):
+        self.assertEqual(split_channels("<think>\nran out of tok"), {"analysis": "ran out of tok", "final": ""})
+
 
 class TestExtract(unittest.TestCase):
     def test_skips_genesis_and_uses_conclusion_not_description(self):
