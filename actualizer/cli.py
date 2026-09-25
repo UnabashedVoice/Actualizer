@@ -171,6 +171,18 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Model output (framing notes, referent summaries, sources) routinely
+    # contains characters — em-dashes, curly quotes, arbitrary Unicode from
+    # a live backend — that a narrower default console codepage can't
+    # encode (see wizard.py, which hit this for real). Never let display
+    # be the thing that breaks a run whose analysis actually succeeded.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
