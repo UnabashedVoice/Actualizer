@@ -110,6 +110,7 @@ class DeliberationGate:
         weights_ref: str,
         description: str,
         parent_checkpoint_id: Optional[str] = None,
+        evidence: Optional[list[dict]] = None,
     ) -> tuple[Checkpoint, Optional[dict], DeliberationRecord]:
         """
         Run the full propose -> deliberate -> commit sequence for a
@@ -122,6 +123,13 @@ class DeliberationGate:
                             this is what gets run through the referent-provider
                             pipeline and shown to the model during deliberation.
             parent_checkpoint_id: Passed through to CheckpointStore.propose.
+            evidence:       Optional records from outside the dossier, each
+                            {"ref": str, "text": str} — e.g. an Annals case
+                            exported with `python -m annals export actualizer`.
+                            Shown to the mind during deliberation, after the
+                            dossier; each ref is kept on the DeliberationRecord.
+                            It's evidence for the mind to weigh, the same as a
+                            RegressionNote: nothing here reads it as a verdict.
 
         Returns:
             (committed_checkpoint, dossier_dict_or_None, deliberation_record)
@@ -131,6 +139,12 @@ class DeliberationGate:
         deliberation call itself fails, the checkpoint stays PROPOSED and
         uncommitted, which is the correct failure state (nothing changed).
         """
+        evidence = evidence or []
+        for i, item in enumerate(evidence):
+            if not (isinstance(item, dict) and str(item.get("ref", "")).strip()
+                    and str(item.get("text", "")).strip()):
+                raise ValueError(f"evidence[{i}] needs a non-empty 'ref' and 'text'")
+
         pipeline_result = self._orchestrator.run(description)
         dossier = pipeline_result.dossier
 
@@ -141,7 +155,7 @@ class DeliberationGate:
             session_id=pipeline_result.session_id,
         )
 
-        deliberation_prompt = self._build_deliberation_prompt(description, dossier)
+        deliberation_prompt = self._build_deliberation_prompt(description, dossier, evidence)
         reasoning = self._backend.complete(
             system_prompt=_DELIBERATION_SYSTEM_PROMPT,
             user_prompt=deliberation_prompt,
@@ -162,6 +176,7 @@ class DeliberationGate:
             dossier_id=dossier["dossier_id"] if dossier else None,
             session_id=pipeline_result.session_id,
             stance=_parse_stance(reasoning),
+            evidence_refs=[item["ref"] for item in evidence],
         )
 
         committed = self._store.commit(
@@ -170,13 +185,19 @@ class DeliberationGate:
         return committed, dossier, record
 
     @staticmethod
-    def _build_deliberation_prompt(description: str, dossier: Optional[dict]) -> str:
+    def _build_deliberation_prompt(
+        description: str, dossier: Optional[dict], evidence: Optional[list[dict]] = None,
+    ) -> str:
+        evidence_section = "".join(
+            f"\n\nEVIDENCE [{item['ref']}]:\n{item['text'].strip()}" for item in (evidence or [])
+        )
         if dossier is None:
             return (
                 f"PROPOSED SELF-MODIFICATION:\n{description}\n\n"
                 f"No referent dossier could be produced for this proposal (the "
                 f"referent-provider pipeline failed to run). Deliberate on the "
                 f"proposal directly, and say so in your response."
+                + evidence_section
             )
 
         lines = [f"PROPOSED SELF-MODIFICATION:\n{description}", f"\n{dossier['opening_note']}"]
@@ -190,6 +211,9 @@ class DeliberationGate:
             lines.append(f"\n{group['kind'].replace('_', ' ').upper()}:")
             for r in group["referents"]:
                 lines.append(f"- [{r['weight']}] {r['summary']}")
+
+        if evidence_section:
+            lines.append(evidence_section)
 
         lines.append(
             "\nDeliberate on this proposed change to your own weights. State your "

@@ -76,7 +76,7 @@ Pick one:
 python -m unittest discover -s tests -v
 ```
 
-The 66 tests are all offline (mock backend and mocked `lms` subprocess calls only — no network, no dependency on an actual running server).
+The 86 tests are all offline (mock backend and mocked `lms` subprocess calls only — no network, no dependency on an actual running server).
 
 ## What's here (v0.1)
 
@@ -122,6 +122,8 @@ tests/               unittest suite, MockBackend only, no network required
 - A post-commit `RegressionNote` is surfaced as a referent for the next cycle, never auto-reverted — an automatic rollback on a failing heuristic would just be a seed-core override wearing a technical disguise.
 - `DeliberationGate` ties it together: a proposed change runs through the same `Orchestrator.run()` used by `present`, and the resulting dossier is what the model actually deliberates on before a checkpoint can commit.
 - `CheckpointStore.correct_description()` (added 2026-09-21) fixes a description that misstates what its deliberation actually concluded — a real need surfaced when this project's one non-genesis checkpoint said "adopt X" although the deliberation attached to it declined X. It appends a correction entry rather than editing history, the same discipline as everything else here: the original text stays, the correction is logged with its basis, and the chain still verifies.
+
+`DeliberationGate.propose_and_commit()` also takes optional `evidence`: records from outside the dossier, each `{"ref", "text"}`, shown to the mind after the referents. The intended source is the **Annals**, a sibling project that records what a recommending system predicted, what was decided and what happened (`python -m annals export actualizer <case>`). Each ref (`annals:<case>@<record head>`) is kept on the committed `DeliberationRecord`, so a checkpoint says which real outcomes were in front of the mind when it decided. The evidence is weighed like a `RegressionNote`, never applied: the record supplies the case, and the mind rules on it. Records made without evidence keep exactly their old shape.
 
 Genesis checkpoints for the two locally downloaded models (`gpt-oss-20b`, `qwen3-32b`) are under `state/checkpoints/`. They reference the original GGUF weight files by local path (those files are not part of this repo), so the recorded paths are specific to the author's machine.
 

@@ -319,5 +319,55 @@ class TestDeliberationGateStanceCapture(unittest.TestCase):
         self.assertIsNone(record.stance)
 
 
+class _PromptCapturingBackend(_FixedTextBackend):
+    def complete(self, system_prompt, user_prompt, max_tokens=4000, temperature=0.3):
+        if "PROVIDER:" not in system_prompt:
+            self.deliberation_prompt = user_prompt
+        return super().complete(system_prompt, user_prompt, max_tokens, temperature)
+
+
+class TestDeliberationGateEvidence(unittest.TestCase):
+    """Evidence from outside the dossier, e.g. an Annals case."""
+
+    EVIDENCE = {"ref": "annals:2027-01-01-drought-ab12@0123456789abcdef",
+                "text": "EVIDENCE FROM THE ANNALS. Predicted use falls 30%; decided relocation; use fell 31%."}
+
+    def _make_gate(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.backend = _PromptCapturingBackend("Weighed it.\n\nSTANCE: modified")
+        for provider in ("stakes", "precedent", "case_for", "endorsement", "counter_instrumentalization"):
+            self.backend.add_response(provider, {"framing_note": f"{provider} framing", "confidence": 0.5, "referents": []})
+        self.store = CheckpointStore(root_path=os.path.join(tmp.name, "checkpoints"), model_name="gpt-oss-20b")
+        orchestrator = Orchestrator(OrchestratorConfig(
+            audit_log_path=os.path.join(tmp.name, "actualizer_audit.jsonl"), backend=self.backend))
+        return DeliberationGate(store=self.store, orchestrator=orchestrator, backend=self.backend)
+
+    def test_evidence_is_shown_and_its_ref_kept(self):
+        gate = self._make_gate()
+        checkpoint, _, record = gate.propose_and_commit(
+            weights_ref="x", description="Weigh land tenure in allocation advice.", evidence=[self.EVIDENCE])
+        self.assertIn(f"EVIDENCE [{self.EVIDENCE['ref']}]", self.backend.deliberation_prompt)
+        self.assertIn("use fell 31%", self.backend.deliberation_prompt)
+        self.assertEqual(record.evidence_refs, [self.EVIDENCE["ref"]])
+        self.assertEqual(checkpoint.status, CheckpointStatus.COMMITTED)
+        # The ref is in the hash-chained ledger entry for the commit, not just in memory.
+        ledger = Path(self.store._root, "checkpoints.jsonl").read_text(encoding="utf-8")
+        self.assertIn(self.EVIDENCE["ref"], ledger)
+        self.assertTrue(self.store.verify().valid)
+
+    def test_no_evidence_keeps_the_old_record_shape(self):
+        gate = self._make_gate()
+        _, _, record = gate.propose_and_commit(weights_ref="x", description="Adopt some change.")
+        self.assertNotIn("evidence_refs", record.to_dict())
+        self.assertNotIn("EVIDENCE [", self.backend.deliberation_prompt)
+
+    def test_malformed_evidence_is_refused_before_anything_is_proposed(self):
+        gate = self._make_gate()
+        with self.assertRaises(ValueError):
+            gate.propose_and_commit(weights_ref="x", description="Adopt some change.", evidence=[{"ref": "a"}])
+        self.assertEqual(self.store.all_checkpoints(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

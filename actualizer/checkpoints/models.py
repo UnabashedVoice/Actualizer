@@ -88,6 +88,11 @@ class DeliberationRecord:
                         that dossier.
         stance:         Where the mind landed relative to the proposal, if
                         recorded. Optional; None means not captured.
+        evidence_refs:  References to evidence from outside the dossier that
+                        was put in front of the mind during deliberation —
+                        e.g. an Annals case ("annals:<case>@<record head>"),
+                        pinned to the state of the record it was read from.
+                        What the mind made of it is in reasoning_summary.
     """
     thinking_mode_engaged: bool
     reasoning_summary: str
@@ -95,6 +100,7 @@ class DeliberationRecord:
     dossier_id: Optional[str] = None
     session_id: Optional[str] = None
     stance: Optional[Stance] = None
+    evidence_refs: list[str] = field(default_factory=list)
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     recorded_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -112,6 +118,9 @@ class DeliberationRecord:
             "session_id": self.session_id,
             "stance": self.stance.value if self.stance else None,
             "recorded_at": self.recorded_at,
+            # Only written when present, so records made without evidence
+            # keep exactly the shape they had before the field existed.
+            **({"evidence_refs": list(self.evidence_refs)} if self.evidence_refs else {}),
         }
 
     @classmethod
@@ -123,6 +132,7 @@ class DeliberationRecord:
             dossier_id=data.get("dossier_id"),
             session_id=data.get("session_id"),
             stance=Stance(data["stance"]) if data.get("stance") else None,
+            evidence_refs=list(data.get("evidence_refs", [])),
             record_id=data.get("record_id", str(uuid.uuid4())),
             recorded_at=data.get("recorded_at", datetime.now(timezone.utc).isoformat()),
         )
