@@ -72,6 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_present.add_argument("decision", help="Decision text to consider, or '-' to read from stdin")
     p_present.add_argument("--verbose", "-v", action="store_true", help="Show full referent detail")
     p_present.add_argument("--json", dest="json_output", action="store_true", help="Output raw JSON")
+    p_present.add_argument("--compendium", action="store_true",
+                           help="Add the Compendium provider: a model picks entries from its index, "
+                                "and their own text becomes referents")
 
     p_audit = subparsers.add_parser("audit", help="Inspect the audit log")
     asub = p_audit.add_subparsers(dest="audit_command", metavar="<subcommand>")
@@ -119,7 +122,8 @@ def _print_dossier(dossier: dict, verbose: bool) -> None:
 
 def cmd_present(args: argparse.Namespace) -> int:
     decision_text = _read_decision_text(args.decision)
-    orch = Orchestrator(OrchestratorConfig(audit_log_path=args.log))
+    orch = Orchestrator(OrchestratorConfig(audit_log_path=args.log,
+                                           use_compendium=getattr(args, "compendium", False)))
     result = orch.run(decision_text)
 
     if args.json_output:

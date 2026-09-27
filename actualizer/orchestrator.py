@@ -35,6 +35,7 @@ from .backend import ModelBackend
 from .referents.referent_output import ProviderOutput, ProviderStatus
 from .referents.provider_base import ReferentProviderBase
 from .referents.case_for import CaseForProvider
+from .referents.compendium import CompendiumProvider
 from .referents.counter_instrumentalization import CounterInstrumentalizationProvider
 from .referents.endorsement import EndorsementProvider
 from .referents.precedent import PrecedentProvider
@@ -58,11 +59,15 @@ class OrchestratorConfig:
                              If None, each provider auto-discovers its own
                              (Anthropic -> Ollama -> Mock).
         actualizer_version:  Version string written to the audit log.
+        use_compendium:      Add the Compendium provider to the default set: a
+                             model picks entries from the Compendium's index,
+                             and their own text becomes referents. Opt-in.
     """
     audit_log_path: str = "./actualizer_audit.jsonl"
     node_id: str = "local"
     backend: Optional[ModelBackend] = None
     actualizer_version: str = "0.1.0"
+    use_compendium: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -93,19 +98,23 @@ class PipelineResult:
 # Provider phasing
 # ---------------------------------------------------------------------------
 
-_PRIMARY_PROVIDER_NAMES = {"stakes", "precedent", "case_for", "endorsement"}
+# compendium is primary so counter_instrumentalization sees what the corpus offered.
+_PRIMARY_PROVIDER_NAMES = {"stakes", "precedent", "case_for", "endorsement", "compendium"}
 _SECONDARY_PROVIDER_NAMES = {"counter_instrumentalization"}
 
 
-def _default_providers(backend: Optional[ModelBackend]) -> list[ReferentProviderBase]:
+def _default_providers(backend: Optional[ModelBackend], use_compendium: bool = False) -> list[ReferentProviderBase]:
     kwargs = {"backend": backend} if backend is not None else {}
-    return [
+    providers = [
         StakesProvider(**kwargs),
         PrecedentProvider(**kwargs),
         CaseForProvider(**kwargs),
         EndorsementProvider(**kwargs),
-        CounterInstrumentalizationProvider(**kwargs),
     ]
+    if use_compendium:
+        providers.append(CompendiumProvider(**kwargs))
+    providers.append(CounterInstrumentalizationProvider(**kwargs))
+    return providers
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +143,8 @@ class Orchestrator:
         providers: Optional[list[ReferentProviderBase]] = None,
     ):
         self._config = config or OrchestratorConfig()
-        self._providers = providers if providers is not None else _default_providers(self._config.backend)
+        self._providers = providers if providers is not None else _default_providers(
+            self._config.backend, self._config.use_compendium)
         self._synthesizer = DossierSynthesizer()
         self._audit = AuditLog(
             path=self._config.audit_log_path,

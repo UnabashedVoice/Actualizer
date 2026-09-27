@@ -211,6 +211,10 @@ class DeliberationGate:
             lines.append(f"\n{group['kind'].replace('_', ' ').upper()}:")
             for r in group["referents"]:
                 lines.append(f"- [{r['weight']}] {r['summary']}")
+                # A Compendium referent's summary is only the entry's title; its
+                # substance is the corpus text in `detail`, so that is shown too.
+                if any(str(s).startswith("compendium:") for s in r.get("sources", [])):
+                    lines.append("  " + r.get("detail", "").strip().replace("\n", "\n  "))
 
         if evidence_section:
             lines.append(evidence_section)
