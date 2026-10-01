@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..backend import ModelBackend
+from ..harmony import split_channels
 from .provider_base import ReferentProviderBase
 from .referent_output import ProviderOutput, ProviderStatus, Referent, ReferentKind, Weight
 
@@ -53,11 +54,16 @@ def load_compendium():
 class CompendiumProvider(ReferentProviderBase):
     """Referents taken verbatim from Compendium entries a model selected."""
 
-    def __init__(self, backend: Optional[ModelBackend] = None, max_entries: int = 3,
-                 budget_chars: int = 6000, compendium=None, **kwargs):
+    # budget_chars=None: scale to the backend's loaded context window
+    # (compendium_access.budget_for_context: ~1 char per token, 6k-100k).
+    # max_sections=None: the model may ask for any of an entry's sections.
+    def __init__(self, backend: Optional[ModelBackend] = None, max_entries: int = 5,
+                 budget_chars: Optional[int] = None, max_sections: Optional[int] = None,
+                 compendium=None, **kwargs):
         super().__init__(backend=backend, **kwargs)
         self._max_entries = max_entries
         self._budget = budget_chars
+        self._max_sections = max_sections
         self._compendium = compendium
         self.last_consultation: Optional[dict] = None
 
@@ -89,21 +95,44 @@ class CompendiumProvider(ReferentProviderBase):
             return self._backend.complete(system_prompt=system, user_prompt=user,
                                           max_tokens=self._max_tokens, temperature=0.2)
 
-        c = comp.consult(decision_text, complete, max_entries=self._max_entries, budget_chars=self._budget)
+        import compendium_access  # importable once load_compendium() has run
+        if self._budget is None:
+            self._budget = compendium_access.budget_for_context(getattr(self._backend, "context_length", 0))
+        if self._max_sections is None:
+            self._max_sections = len(compendium_access.SECTIONS)
+
+        c = comp.consult(decision_text, complete, max_entries=self._max_entries, budget_chars=self._budget,
+                         max_sections=self._max_sections)
         self.last_consultation = dict(c.to_dict(), identity=c.identity())
         elapsed = int((time.monotonic() - start) * 1000)
         if c.error:
             return ProviderOutput(provider_name=self.provider_name, status=ProviderStatus.FAILED,
                                   error_message=f"Compendium selection failed: {c.error}",
-                                  model_id=self._backend.model_id, processing_time_ms=elapsed)
+                                  model_id=self._backend.model_id, processing_time_ms=elapsed,
+                                  raw_response=c.raw or None,
+                                  reasoning=split_channels(c.raw).get("analysis") if c.raw else None)
+
+        # Briefs for every chosen entry first, then the sections the model asked
+        # for, round-robin across entries, within one shared budget.
+        details = {s["id"]: comp.brief(s["id"]) for s in c.selected}
+        used = sum(len(d) for d in details.values())
+        asked = {s["id"]: (s.get("sections") or ([s["section"]] if s.get("section") else []))
+                 for s in c.selected}
+        for round_ in range(max((len(v) for v in asked.values()), default=0)):
+            for s in c.selected:
+                names = asked[s["id"]]
+                if round_ >= len(names):
+                    continue
+                # whole section, or the whole subsections that fit (a Standing section can be long)
+                body = (comp.fit_section(s["id"], names[round_], self._budget - used)
+                        if hasattr(comp, "fit_section") else comp.section(s["id"], names[round_]))
+                if body and used + len(body) <= self._budget:
+                    details[s["id"]] += f"\n\n{names[round_]}:\n{body}"
+                    used += len(body)
 
         referents = []
         for i, s in enumerate(c.selected):
-            detail = comp.brief(s["id"])
-            if s.get("section"):
-                body = comp.section(s["id"], s["section"])
-                if body and len(detail) + len(body) <= self._budget:
-                    detail += f"\n\n{s['section']}:\n{body}"
+            detail = details[s["id"]]
             referents.append(Referent(
                 summary=f"{comp.title(s['id'])} (Compendium entry {s['id']})",
                 detail=detail,
@@ -122,7 +151,9 @@ class CompendiumProvider(ReferentProviderBase):
                     "this decision; nothing from the corpus is offered.")
         return ProviderOutput(provider_name=self.provider_name, status=ProviderStatus.SUCCESS,
                               referents=referents, framing_note=note, confidence=None,
-                              model_id=self._backend.model_id, processing_time_ms=elapsed)
+                              model_id=self._backend.model_id, processing_time_ms=elapsed,
+                              raw_response=c.raw, reasoning=split_channels(c.raw).get("analysis"),
+                              finish_reason=getattr(self._backend, "last_finish_reason", None))
 
     def offer_with_other_outputs(self, decision_text: str, other_outputs: list) -> ProviderOutput:
         # The selection is made from the decision alone, never steered by what other

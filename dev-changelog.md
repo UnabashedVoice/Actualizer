@@ -23,6 +23,34 @@ Actualizer (`github.com/UnabashedVoice/Actualizer`) is the consciousness-oriente
 
 ---
 
+## 2026-09-28 to 09-30 (committed 2026-09-30)
+
+### Changed (2026-09-30)
+- **No fixed context or output caps** (user request: windows must never be too small for the system to do its work).
+  - The wizard loads each model at its own maximum, capped at 131072 (`DEFAULT_CONTEXT_LENGTH`; `ACTUALIZER_CONTEXT_LENGTH` overrides the cap). A failed load steps down through 65536, 32768 and 16384.
+  - Measured on the dev machine: gpt-oss-20b at 131072 uses ~14 GB of RAM (31 GB total) and generates at ~12.8 tok/s. LM Studio's `--estimate-only` overstates this and is not used as a gate.
+  - `LMStudioBackend` asks LM Studio (`/api/v0/models/{id}`) for the loaded context length when none is given, once per backend (`context_length` property, `probe_loaded_context`). Every call then gets all the window its prompt leaves free. The fixed `max_tokens` values (5000 for providers, 6000 for deliberation) are floors, used only when the window is unknown.
+  - Timeouts: `LMStudioBackend` and `OllamaBackend` now default to 6 hours; the wizard no longer passes 600 s. `OllamaBackend` sends `num_predict: -1` and takes `num_ctx` from `OLLAMA_NUM_CTX`.
+- **Compendium provider** budgets scale to the backend's window (`compendium_access.budget_for_context`, 6k-100k characters), and the model may ask for any number of sections. Over-budget sections are shown as whole subsections that fit (`Compendium.fit_section`), never cut mid-text, because a Standing section can exceed a small budget.
+- **Tests:** `TestRouting` no longer reaches a live LM Studio (the probe is stubbed). Added `TestAnswerBudget` (4 tests). 95 tests pass.
+
+### Changed (2026-09-28 to 09-29)
+
+### Changed
+- **Deliberation prompt** (`checkpoints/gate.py`, user request 2026-09-29).
+  - The answer must now set out REASONS FOR, REASONS AGAINST, WHAT DECIDED IT (naming the referents that carried most weight, and any set aside) and WHAT WOULD CHANGE MY MIND, before the STANCE line.
+  - The line "a short, honest response is worth more than a long one" became "let the length follow the reasoning you actually did".
+  - **Deliberations from here on are not strictly comparable with earlier ones.**
+- **Default context raised to 16384** (`wizard.DEFAULT_CONTEXT_LENGTH`; superseded on 09-30, see above). Provider and deliberation caps went to 5000 and 6000 tokens. `LMStudioBackend(context_length=...)` lets every call use all the context its prompt leaves free.
+- **`LMStudioBackend(reasoning_effort=...)`** for gpt-oss; any non-default effort becomes part of the `model_id`.
+
+### Added
+- **Raw output for every provider.** `ProviderOutput` now carries `raw_response`, `reasoning` and `finish_reason`, so every provider call can be read in full.
+- **Deeper Compendium provider:** up to 5 entries and 2 extra sections each, within one shared ~14k-character budget.
+
+### Fixed
+- **The provider parser now reads only the answer channel.** At high reasoning effort, gpt-oss's analysis channel contains braces, which broke the first-`{`-to-last-`}` fallback. Three of six providers failed on responses whose final channel held valid JSON (q10, 2026-09-29).
+
 ## 2026-09-26: Compendium wiring (committed 2026-09-27)
 
 ### Added

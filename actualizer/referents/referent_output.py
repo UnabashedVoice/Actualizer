@@ -126,6 +126,9 @@ class ProviderOutput:
         error_message:      Error detail if status != SUCCESS.
         output_id:          Auto-generated UUID.
         generated_at:       UTC timestamp.
+        raw_response:       The model's complete output, reasoning included.
+        reasoning:          Its reasoning part (gpt-oss analysis channel or a
+                            <think> block), if any.
     """
     provider_name: str
     status: ProviderStatus
@@ -137,6 +140,9 @@ class ProviderOutput:
     error_message: Optional[str] = None
     output_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    raw_response: Optional[str] = None
+    reasoning: Optional[str] = None
+    finish_reason: Optional[str] = None   # "length": the model ran out of room mid-answer
 
     def __post_init__(self):
         if self.confidence is not None and not (0.0 <= self.confidence <= 1.0):
@@ -162,4 +168,7 @@ class ProviderOutput:
             "processing_time_ms": self.processing_time_ms,
             "error_message": self.error_message,
             "generated_at": self.generated_at,
+            "reasoning": self.reasoning,
+            "finish_reason": self.finish_reason,
+            "raw_response": self.raw_response,
         }

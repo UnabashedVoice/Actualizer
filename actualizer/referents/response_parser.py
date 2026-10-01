@@ -17,6 +17,7 @@ import json
 import re
 from typing import Optional
 
+from ..harmony import split_channels
 from .referent_output import ProviderOutput, ProviderStatus, Referent, ReferentKind, Weight
 
 
@@ -203,7 +204,12 @@ def parse_provider_response(
     FAILED status output with the error in error_message.
     """
     try:
-        json_str = _extract_json(raw_response)
+        # Parse the answer only. gpt-oss's analysis channel and a Qwen3 <think>
+        # block come through unstripped (see backend.py), and reasoning at length
+        # contains braces of its own, which defeated the first-{-to-last-}
+        # fallback: at high reasoning effort (2026-09-29) three of six providers
+        # failed on responses whose final channel held valid JSON.
+        json_str = _extract_json(split_channels(raw_response).get("final") or raw_response)
         data = json.loads(json_str)
     except (ValueError, json.JSONDecodeError) as e:
         return ProviderOutput(

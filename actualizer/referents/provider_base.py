@@ -33,6 +33,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from ..backend import ModelBackend, BackendError, get_default_backend
+from ..harmony import split_channels
 from .referent_output import ProviderOutput, ProviderStatus
 from .response_parser import RESPONSE_SCHEMA, parse_provider_response
 
@@ -108,14 +109,10 @@ class ReferentProviderBase(ABC):
         backend: Optional[ModelBackend] = None,
         max_retries: int = 2,
         retry_delay_s: float = 1.0,
-        # Sized against wizard.py's DEFAULT_CONTEXT_LENGTH (8192): the
-        # worst observed real prompt (counter_instrumentalization seeing
-        # all four primary providers) is ~2.6k tokens, and the worst
-        # observed real completion is ~1.1k — 3000 leaves both plenty of
-        # room to run longer than any real call has, without the two
-        # combined risking the context window. Raise both together if
-        # DEFAULT_CONTEXT_LENGTH changes.
-        max_tokens: int = 3000,
+        # A floor, not a cap: an LM Studio backend that knows its loaded
+        # context gives every call all the window the prompt leaves free
+        # (LMStudioBackend._answer_budget). This applies only where it doesn't.
+        max_tokens: int = 5000,
         temperature: float = 0.4,
     ):
         self._backend = backend or get_default_backend()
@@ -228,6 +225,7 @@ dossier entry, not an inflated one."""
         ProviderOutput, never raises.
         """
         last_error = None
+        last_raw = None
         for attempt in range(self._max_retries + 1):
             start = time.monotonic()
             try:
@@ -245,6 +243,12 @@ dossier entry, not an inflated one."""
                     model_id=self._backend.model_id,
                     processing_time_ms=elapsed_ms,
                 )
+                # Keep the complete output, reasoning included, for the run's
+                # thought log: the referents are the conclusion, not the thinking.
+                output.raw_response = response
+                output.reasoning = split_channels(response).get("analysis")
+                output.finish_reason = getattr(self._backend, "last_finish_reason", None)
+                last_raw = response
 
                 if output.status == ProviderStatus.SUCCESS:
                     return output
@@ -263,6 +267,8 @@ dossier entry, not an inflated one."""
             error_message=f"Provider failed after {self._max_retries + 1} attempt(s). "
                          f"Last error: {last_error}",
             model_id=self._backend.model_id,
+            raw_response=last_raw,
+            reasoning=split_channels(last_raw).get("analysis") if last_raw else None,
         )
 
     def offer(self, decision_text: str) -> ProviderOutput:

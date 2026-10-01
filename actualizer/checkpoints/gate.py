@@ -40,9 +40,20 @@ actually engage: read the referents below, then state your own reasoning
 and where you land, including "I've considered this and am proceeding
 anyway" if that is genuinely where you land.
 
-Respond in plain prose, not JSON. Be honest about uncertainty. A short,
-honest response is worth more than a long one that performs more
-deliberation than actually happened.
+Respond in plain prose, not JSON. Be honest about uncertainty. Let the
+length follow the reasoning you actually did: don't perform more
+deliberation than happened, and don't cut your reasons short either.
+
+Before your final line, set out your reasons under these four headings,
+in plain prose:
+REASONS FOR: what pulls toward making this change, and how much weight
+you give each consideration.
+REASONS AGAINST: what pulls against it, and how much weight you give each.
+WHAT DECIDED IT: which consideration settled where you land, and why it
+outweighed the others. Name the referents that carried most weight and
+any you set aside, and say why.
+WHAT WOULD CHANGE MY MIND: the evidence or argument that would move you
+to a different stance.
 
 End your response with one final line, on its own, in exactly this form:
 STANCE: <one word>
@@ -159,13 +170,11 @@ class DeliberationGate:
         reasoning = self._backend.complete(
             system_prompt=_DELIBERATION_SYSTEM_PROMPT,
             user_prompt=deliberation_prompt,
-            # Sized against wizard.py's DEFAULT_CONTEXT_LENGTH (8192): the
-            # worst observed real deliberation prompt is ~1.3k tokens and
-            # the worst observed real completion (reasoning + answer) is
-            # ~1.4k — 4000 gives roughly 3x that with prompt+completion
-            # still well inside the window. Raise if DEFAULT_CONTEXT_LENGTH
-            # changes.
-            max_tokens=4000,
+            # A floor, not a cap: an LM Studio backend that knows its loaded
+            # context (given, or asked of LM Studio) gives every call all the
+            # window the prompt leaves free (LMStudioBackend._answer_budget).
+            # This value applies only where the window is unknown.
+            max_tokens=6000,
             temperature=0.4,
         )
 

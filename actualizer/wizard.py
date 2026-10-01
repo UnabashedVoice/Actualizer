@@ -58,10 +58,26 @@ from actualizer.orchestrator import Orchestrator, OrchestratorConfig
 # provider_base.py MAX_TOKENS cap of 6000, and deliberation's actual
 # completion (reasoning + answer) was ~1.4k against gate.py's own cap.
 # Both caps were sized for the now-abandoned 32768 setting; see the matching
-# comments there. 8192 covers the worst *prompt* seen with room to spare, and
-# still leaves comfortable headroom against the (also lowered) completion
-# caps for a real run to run longer than any seen so far without truncating.
-DEFAULT_CONTEXT_LENGTH = 8192
+# comments there. 8192 covered the worst *prompt* seen at the time.
+#
+# Raised to 16384 on 2026-09-28 (user decision). With the Compendium provider
+# and Annals evidence, a real deliberation prompt reached ~4.5k tokens
+# (system_runs/2026-09-26-five-question/actualizer_smoke/), which with the
+# 4000-token deliberation cap no longer fit 8192. The extra room is meant for
+# a deeper read of the Compendium (up to 5 entries, 2 extra sections each,
+# ~14k characters) and for gpt-oss reasoning at high effort. It costs ~20%
+# generation speed on this machine (9.1 -> 7.2 tok/s, measured above).
+#
+# Raised again on 2026-09-30 (user decision: context and output windows must
+# never be too small for the system to do its work). Each model is now loaded
+# at its own maximum, capped at DEFAULT_CONTEXT_LENGTH; ACTUALIZER_CONTEXT_LENGTH
+# overrides the cap. If a load fails (memory), the wizard steps down through
+# FALLBACK_CONTEXT_LENGTHS. Measured on this machine: gpt-oss-20b at 131072 uses
+# ~14 GB of RAM (9 GB still free of 31) and generates at ~12.8 tok/s.
+# The backends ask LM Studio for the loaded length, and every call may use all
+# the window its prompt leaves free.
+DEFAULT_CONTEXT_LENGTH = int(os.environ.get("ACTUALIZER_CONTEXT_LENGTH", "131072"))
+FALLBACK_CONTEXT_LENGTHS = (65536, 32768, 16384)
 
 STATE_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state", "checkpoints")
 
@@ -202,6 +218,39 @@ def _loaded_context_length(model_id: str, base_url: str = "http://localhost:1234
         return None
 
 
+def _max_context_length(model_id: str, base_url: str = "http://localhost:1234") -> Optional[int]:
+    """Best-effort: the longest context the model supports (LM Studio's max_context_length)."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/v0/models/{model_id}", timeout=3) as resp:
+            value = json.loads(resp.read().decode("utf-8")).get("max_context_length")
+            return int(value) if value else None
+    except Exception:
+        return None
+
+
+def _target_context_length(model_id: str) -> int:
+    """The model's maximum context, capped at DEFAULT_CONTEXT_LENGTH."""
+    longest = _max_context_length(model_id)
+    return min(DEFAULT_CONTEXT_LENGTH, longest) if longest else DEFAULT_CONTEXT_LENGTH
+
+
+def _load_with_fallback(lms_cmd: str, model_name: str):
+    """Load at the target context; if that fails, step down. Returns (result, context)."""
+    target = _target_context_length(model_name)
+    tries = [target] + [c for c in FALLBACK_CONTEXT_LENGTHS if c < target]
+    result = None
+    for ctx in tries:
+        result = _run_lms(lms_cmd, "load", model_name, "--yes", "--identifier", model_name,
+                          "--context-length", str(ctx), timeout=600)
+        if result.returncode == 0:
+            if ctx != target:
+                _say(f"Loaded with a working memory of {ctx} tokens ({target} didn't fit).")
+            return result, ctx
+    return result, None
+
+
 def _downloaded_model_names(lms_cmd: str) -> list[str]:
     """
     Best-effort parse of `lms ls`'s table. If the format doesn't match
@@ -249,19 +298,17 @@ def _ensure_server_and_model(lms_cmd: str) -> str:
         if len(loaded) == 1:
             _say(f"Using the model that's already loaded: {loaded[0]}")
             ctx = _loaded_context_length(loaded[0])
-            if ctx is not None and ctx < DEFAULT_CONTEXT_LENGTH:
+            target = _target_context_length(loaded[0])
+            if ctx is not None and ctx < target:
                 _say(
                     f"It's running with a working memory of only {ctx} tokens, which can "
                     f"run short once the perspectives and its own reasoning are counted. "
-                    f"Reloading it at {DEFAULT_CONTEXT_LENGTH} avoids that."
+                    f"Reloading it at {target} avoids that."
                 )
                 if _confirm("Reload it with more working memory?"):
                     print("  Reloading — this can take a minute...")
                     _run_lms(lms_cmd, "unload", loaded[0], timeout=120)
-                    result = _run_lms(
-                        lms_cmd, "load", loaded[0], "--yes", "--identifier", loaded[0],
-                        "--context-length", str(DEFAULT_CONTEXT_LENGTH), timeout=300,
-                    )
+                    result, _ = _load_with_fallback(lms_cmd, loaded[0])
                     if result.returncode != 0:
                         _say(f"Couldn't reload it: {(result.stderr or result.stdout).strip()[:300]}")
                         sys.exit(1)
@@ -295,10 +342,7 @@ def _ensure_server_and_model(lms_cmd: str) -> str:
         sys.exit(0)
 
     print(f"  Loading {model_name} — this can take a minute...")
-    load_result = _run_lms(
-        lms_cmd, "load", model_name, "--yes", "--identifier", model_name,
-        "--context-length", str(DEFAULT_CONTEXT_LENGTH), timeout=300,
-    )
+    load_result, _ = _load_with_fallback(lms_cmd, model_name)
     if load_result.returncode != 0:
         _say(f"Couldn't load it: {(load_result.stderr or load_result.stdout).strip()[:300]}")
         sys.exit(1)
@@ -484,7 +528,8 @@ def main() -> int:
         return 1
 
     model_name = _ensure_server_and_model(lms_cmd)
-    backend = LMStudioBackend(model=model_name, timeout=600)
+    # Default timeout (hours) and the loaded context length, asked of LM Studio.
+    backend = LMStudioBackend(model=model_name)
 
     while True:
         print("\nWhat would you like to do?")

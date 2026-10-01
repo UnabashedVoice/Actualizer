@@ -37,6 +37,12 @@ class TestHarmonyRendering(unittest.TestCase):
 
 
 class TestRouting(unittest.TestCase):
+    def setUp(self):
+        # Never ask a live LM Studio for the loaded context during unit tests.
+        probe = patch("actualizer.backend.probe_loaded_context", return_value=0)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def test_gpt_oss_uses_raw_completions(self):
         backend = LMStudioBackend(model="gpt-oss-20b")
         with patch.object(backend, "_post", return_value={"choices": [{"text": "out"}]}) as post:
@@ -69,6 +75,30 @@ class TestRouting(unittest.TestCase):
         self.assertEqual(path, "/v1/chat/completions")
         self.assertEqual(payload["messages"][0], {"role": "system", "content": "SYS"})
         self.assertEqual(backend.model_id, "lmstudio/qwen3-32b")
+
+
+class TestAnswerBudget(unittest.TestCase):
+    """Every call may use all the context its prompt leaves free."""
+
+    def test_budget_fills_the_context(self):
+        b = LMStudioBackend("gpt-oss-20b", context_length=16384)
+        self.assertEqual(b._answer_budget(6000, 4000), 16384 - (2000 + 300) - 256)
+        self.assertEqual(b._answer_budget(60000, 4000), 512)  # prompt nearly fills it: a small floor
+
+    def test_unknown_context_keeps_the_requested_budget(self):
+        with patch("actualizer.backend.probe_loaded_context", return_value=0):
+            self.assertEqual(LMStudioBackend("gpt-oss-20b")._answer_budget(6000, 4000), 4000)
+
+    def test_loaded_context_is_asked_of_lm_studio_once(self):
+        with patch("actualizer.backend.probe_loaded_context", return_value=131072) as probe:
+            b = LMStudioBackend("gpt-oss-20b")
+            self.assertEqual(b._answer_budget(6000, 4000), 131072 - (2000 + 300) - 256)
+            b._answer_budget(9000, 4000)
+            self.assertEqual(probe.call_count, 1)
+            self.assertEqual(b.context_length, 131072)
+
+    def test_default_timeout_allows_long_runs(self):
+        self.assertGreaterEqual(LMStudioBackend("gpt-oss-20b")._timeout, 6 * 3600)
 
 
 if __name__ == "__main__":
